@@ -1,0 +1,58 @@
+# config
+cover: /img/bg_img.jpg
+logo: /img/logo.png
+top_saying:
+- {title: <span>HAPPINESS</span> IS AROUND THE CORNER, WELCOME., content: 做人呢，最重要的是要开心。}
+bottom_saying: 本来无一物，何处惹尘埃
+# Content
+excerpt_link: Read More
+
+rss: /atom.xml
+
+highlightjs: vs
+
+#Works
+# works:
+# - works_name: AAA
+#   works_url: /
+# - works_name: BBB
+#   works_url: /atom.xml
+
+#disqus name
+disqus: koly
+
+# Miscellaneous
+github: https://github.com/kolyjjj
+# twitter: https://twitter.com/
+# facebook: https://www.facebook.com/
+# google: https://google.com/
+# weibo: http://weibo.com/
+
+#about  timeline
+timeline:
+- num: 1
+  word: 2015/05/09-使用hexo搭建了自己的博客
+- num: 2
+  word: 希望可以坚持写博客
+# - num: 3
+#   word: 2015/02/18-DDD
+# - num: 4
+#   word: More
+
+#Links
+links:
+- name: github
+  link: https://github.com/kolyjjj
+- name: douban
+  link: http://www.douban.com/people/59390507/notes
+
+# Archives
+## 2: Enable pagination
+## 1: Disable pagination
+## 0: Fully Disable
+archive: 2
+category: 1
+tag: 1
+
+# google analytics config
+google_analytics: UA-74042991-1
