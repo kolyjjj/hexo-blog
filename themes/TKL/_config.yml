@@ -9,7 +9,7 @@ excerpt_link: Read More
 
 rss: /atom.xml
 
-highlightjs: vs
+highlightjs: github
 
 #Works
 # works:
@@ -56,3 +56,4 @@ tag: 1
 
 # google analytics config
 google_analytics: UA-74042991-1
+
