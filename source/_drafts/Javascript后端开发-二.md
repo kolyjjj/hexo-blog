@@ -214,4 +214,73 @@ router.get('/', (req, res)=>{
     .expect(200, done);
   });
 ```
+## 增加独立的router来处理404的情况
+先贴一段创建comment的代码：
+```javascript
+// src/comments/router.js
+router.post('/', (req, res, next)=>{
+  let aComment = Object.assign({postId:req.params.id}, req.body); 
+  commentsdb.save(aComment).then((data)=>{
+    if (lodash.isEmpty(data)) return next();
+    console.log('sending 200');
+    res.status(200).send(data);
+  }, (err)=>{
+    console.log('fail to create comment', err);
+    res.status(400).send();
+  });
+});
+```
+由于comments属于post，所以在创建comment的时候需要传入postID，以确定该comment到底属于谁。既然传入了postID，那么自然存在postID找不到的情况，这时就应该返回404错误。对于404错误的返回，之前在post的router中使用的是`res.status(404).send();`，这里换一种方式。上面的代码中，如果返回的data是空，那么直接`return next()`，`next()`表示让后面的router函数来处理，而`return`表示跳过后面的操作，后面的函数为：
+```javascript
+// src/routers.js
+
+router.post('*', (req, res, next)=>{
+  console.log('inceptor request', req.method, req.path);
+  res.status(404).send();
+});
+```
+这里在router分发的地方做一些全局的操作，这里将404的返回放到了所有router函数之后。还有就是回过头去想，在创建comments的时候并不需要判断data来返回是否404，因为就算传入的是错误的postId，已然会创建成功，所以后面做了一些改动。
+## 关系带来的考量
+从Restful的角度来看，万物皆资源。posts是一种资源，comments也是一种资源。这两种资源并不是独立的，他们具有一种“属于”关系，也就是一对多关系。那么在对这两种资源进行操作的时候，这种“属于”关系会带来什么影响呢？
+一般来说，资源的操作都包括四种，即增、删、改、查。我们分别考虑一下posts的操作对comments的影响以及comments的操作对posts的影响。
+操作posts：
+* create，posts可以没有comments，所以对post的创建可以跟comments没有关系
+* update，对posts进行修改的时候，一般情况下可以独立进行。这里的一般情况是指所改动的地方与comments没有关系。比如posts跟comments的关系是由postId来维系，那么修改post的时候没有修改postId，就没有必要对comments进行修改
+* get posts，查看posts列表的时候，一般不需要显示comments，所以跟comments没有关系；但如果需要显示comments的数量，就跟comments有关了
+* get post，即获取单独的一个post的时候，一般来说需要获取该post对应的comments，因此跟comments有关
+* delete post，删除post的时候需要将该post下面的comments全部删除
+
+操作comments：
+* create，由于comments从属于某一个post，所以在创建comments的时候，需要指定一个postId，并且还需要验证该postId是有效的
+* update comments，如果不更改comment的从属关系，那么只需要更改comment，不太需要考虑post
+* get comments，从属关系，所以需要一个postId，并且需要验证该postId的有效性
+* get comment, 需要一个postId，或者一个单独的commentId
+* delete comment，删除comment的时候，一个commentId就足够了。
+
+这里考量的目的主要有两个：
+* 遇到资源与资源之间的关系的时候，代码就开始变复杂了。关系越来越纷杂的时候，代码就更复杂了。所以在关系出现或者增加的时候，需要考虑系统的设计或重构。
+* 关系所带来的影响可以举一反三，一对多带来的影响可以进行具体的泛化
+这里具体一点，就是在刚刚实现创建comment的时候，并没有验证postId的有效性，补上：
+```javascript
+// src/comments/router.js
+router.post('/', (req, res, next)=>{
+  postsdb.getOne(req.params.id)
+  .then((data)=>{
+    if (lodash.isEmpty(data)) return next();
+
+    let aComment = Object.assign({postId:req.params.id}, req.body); 
+    commentsdb.save(aComment).then((data)=>{
+      if (lodash.isEmpty(data)) return next();
+      res.status(200).send(data);
+    }, (err)=>{
+      console.log('fail to create comment', err);
+      res.status(400).send();
+    });
+  }, (err)=>{
+    res.status(404).json({message: 'cannot find post id.'});
+  });
+});
+````
+这样，comments的建立就变得复杂了一些，后面我们再来看看能不能进行简化，以及如何简化。
+
 
