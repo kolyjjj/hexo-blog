@@ -283,4 +283,126 @@ router.post('/', (req, res, next)=>{
 ````
 这样，comments的建立就变得复杂了一些，后面我们再来看看能不能进行简化，以及如何简化。
 
+## 更新comment
+这里跟更新post类似，使用put方法，只是需要对传进来的post id进行存在性验证。看看关键代码：
+```javascript
+// src/comments/router.js
 
+router.put('/:commentId', (req, res, next) => {
+ postsdb.getOne(req.params.id)
+ .then(data => {
+   if (lodash.isEmpty(data)) return next();
+
+   let newComment = req.body;
+   commentsdb.update(req.params.commentId, newComment)
+   .then(data=>{
+     res.status(200).send(data);
+   }, err => {
+     console.log('fail to update comment', err);
+     res.status(400).send();
+   });
+ }, err => {
+   console.log('updating comments ' + req.params.commentId + ' error with post id ' + req.params.id);
+   res.status(404).json({message: 'cannot find post id.'});
+ });
+});
+
+// src/comments/commentsdb.js
+
+  update(id, data) {
+    console.log('commentsdb updating', id, data);
+    return Comment.findByIdAndUpdate(id, {
+      author: data.author,
+      content: data.content,
+      last_edit_date: Date.now()
+    }, {
+      new: true,
+      runValidator: true
+    });
+  },
+
+```
+这里的代码跟之前创建comment的代码有些类似，同时看起来不是很爽，使用promise来表达同步思维，仍然让人觉得不是很舒服。下面就来重构重构。
+## co的引入
+[co](https://github.com/tj/co)，是一个库，可以借助ES6的[generator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_Generators)，关于generator的解释可以参考我的博客《ES6 generator探索》(http://koly.me/2015/07/25/ES6-generator%E6%8E%A2%E7%B4%A2/)，这里就不讲generator了，直接看看重构之前和之后的代码：
+重构前：
+```javascript
+router.post('/', (req, res, next)=>{
+  postsdb.getOne(req.params.id)
+  .then((data)=>{
+    if (lodash.isEmpty(data)) return next();
+
+    let aComment = Object.assign({postId:req.params.id}, req.body); 
+    commentsdb.save(aComment).then((data)=>{
+      res.status(200).send(data);
+    }, (err)=>{
+      console.log('fail to create comment', err);
+      res.status(400).send();
+    });
+  }, (err)=>{
+    res.status(404).json({message: 'cannot find post id.'});
+  });
+});
+```
+
+重构后：
+```javascript
+// src/comments/router.js
+import co from 'co';
+router.post('/', (req, res, next)=>{
+  co(function *(){
+    let aPost = yield postsdb.getOne(req.params.id);
+    if (lodash.isEmpty(aPost)) return next();
+    let aComment = Object.assign({postId:req.params.id}, req.body); 
+    let result = yield commentsdb.save(aComment);
+    res.status(200).send(result);
+  })
+  .catch(err => {
+    console.log('err', err);
+    if (err.kind === 'ObjectId') return res.status(404).json({message: 'cannot find post id'});
+    res.status(400).json({message:'valiation error'});
+  });
+});
+```
+可以看到重构之后的代码比原来的代码可读性要好一些了，更“同步”了。在实现的过程中，需要引入[co](https://github.com/tj/co)，同样也是通过npm安装，然后为了让babeljs可以编译generator，还需要安装[babel-polyfill](https://babeljs.io/docs/usage/polyfill/)。并且在`app.js`中添加`import "babel-polyfill";`
+
+## 使用ES7中的async及await
+上面的co及generator的形式已经不错了，但为了追赶潮流，我们还可以使用ES7中的async及await:
+```javascript
+// src/comments/router.js
+
+import {wrap} from '../utils/utils';
+
+router.post('/', wrap(async function (req, res, next) {
+    try{
+      let aPost = await postsdb.getOne(req.params.id);
+      if (lodash.isEmpty(aPost)) return next();
+      let aComment = Object.assign({postId:req.params.id}, req.body); 
+      let result = await commentsdb.save(aComment);
+      res.status(200).json(result);
+    } catch (err){
+      console.log('err', err);
+      if (err.kind === 'ObjectId') return res.status(404).json({message: 'cannot find post id'});
+      res.status(400).json({message:'valiation error'});
+    }
+}));
+```
+其中的wrap是由于express本身不支持async而添加的，其代码：
+```javascript
+// src/utils/utils.js
+
+'use strict';
+
+const wrap = fn => (...args) => fn(...args);
+
+export {wrap};
+```
+wrap函数接收一个函数作为参数返回另一个函数。返回的函数接收多个参数，并调用wrap函数接收的参数同时应用这些参数。async function也是一个function，所以其内部代码的执行，已然需要对该函数的调用。
+
+为了使babeljs能够编译async，需要引入[babel-plugin-transform-async-to-generator](https://www.npmjs.com/package/babel-plugin-transform-async-to-generator)，并且在`.babelrc`中加上一些代码：
+```javascript
+{
+    "presets": ["es2015"],
+    "plugins": ["transform-async-to-generator"]
+}
+```
