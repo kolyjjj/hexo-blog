@@ -425,5 +425,93 @@ router.delete('/:commentId', wrap(async function (req, res, next) {
 ## 删除post
 根据之前的post与comment的关系分析，在删除post的时候，需要同时删除属于该post的comments。这里就设计到“事务”，即删除comments是删除post的一部分，如果comments删除失败，而post删除成功，那么整体上就不算成功。关于事务，最经典的例子就是简单的银行转账的例子，A账户需要把钱转到B账户，就有两个步骤：1）扣除A账户上的钱；2）将扣除的钱加到B账户上。处理转账操作时需要将这两个操作捆绑在一起，必须两个都成功，转账操作才算成功，只要其中任意一个失败，转账就失败。失败的情况就有两种第一步扣除失败及第二部增加失败。扣除失败的情况简单，只需要返回转账失败就可以了；而增加失败的情况多出一步，除了返回转账失败外，还需要将A账户上扣除的钱增加回去(这一步称为回滚)。那么这两步捆绑的操作，就是一个“事务”。
 如何实现事务呢？经过一番搜索，发现mongodb本身不支持事务处理，如果要实现事务操作的话，需要自己实现诸如[两步提交]()的形式。心里一想，这也有点复杂了吧，这又不是一个分布式系统。mongodb为什么不支持事务处理呢？有几个原因，其中一个是部分系统并不需要事务，而实现事务会影响数据库的可扩展性。那么回到post和comments，这里到底需要不需要严格的事务呢？首先post对于用户来说是重要的，但是comment相对而言就不太重要了。一个post的comment少了一条或者几条，应该并没有多大的影响。而且如果一个post要被删除了，意味着该post存在的意义不大了，既然post存在的意义不大，那么可以认为其comments的意义就不大。所以这里post和comment的权重是不一样的，post的权重要大一点，起决定性作用，即post的删除成功是由post决定的。所以删除成功的情况，必须保证post确实被删除了。删除成功比较好办，两个都删除了就返回成功。如果post删除失败或者comments删除失败，就返回失败。只是由于这里没有事务操作，所以没有回滚。这时候就有两种处理顺序：1)删除comments，成功后删除post；2）删除post，成功后删除comments。第二种情况，如果post删除的时候失败了，用户无法通过同样的接口重试，这样数据库里面就会存在一些没有对应post的comments。从用户的角度，删除失败之后再去访问post应该可以可以访问，但是实际确无法访问；第一种情况，删除失败，用户依然可以访问post，并且可以重试。明显，这里选择第二种处理方式。
+那么，看看代码：
+
+测试：
+```javascript
+it('should delete a post with comments', function(done){
+    const aComment = {
+      "author":"koy",
+      "content":"this is a comment"
+    };
+    let postId;
+    request(app)
+    .post('/api/posts')
+    .send(aPost)
+    .expect('Content-Type', /json/)
+    .expect(200)
+    .end((err, res)=>{
+      if (err) throw err;
+      postId = res.body.id;
+      request(app)
+      .post('/api/posts/'+postId+'/comments')
+      .send(aComment)
+      .expect(200)
+      .end((err, res)=>{
+        if (err) throw err;
+        request(app)
+        .delete('/api/posts/'+postId)
+        .expect(200)
+        .end((err, res)=>{
+          if (err) throw err;
+          request(app)
+          .get('/api/posts/'+postId+'/comments')
+          .expect(200)
+          .expect((res)=>{
+            res.body.should.be.deepEqual([]);
+          })
+          .end(done);
+        });
+      });
+    });
+  });
+```
+
+实现：
+```javascript
+// src/posts/router.js
+import postsdb from './postsdb';
+import {wrap} from '../utils/utils';
+import commentsdb from '../comments/commentsdb';
+
+router.delete('/:id', wrap(async function(req, res, next) {
+  try {
+    const comments = await commentsdb.getAll(req.params.id);
+    if (comments !== null && comments.length > 0) {
+      for (let c of comments) { 
+        await commentsdb.deleteOne(c._id);
+      }
+    }
+    console.log('post id', req.params.id);
+    await postsdb.deleteOne(req.params.id);
+    res.status(200).send();
+  } catch (err) {
+    console.log('deleting post error', err);
+    res.status(404).send();
+  }
+}));
+```
+其中的`for (let c of comments)`替换成`comments.forEach(c => await commentsdb.deleteOne(c._id))`会出错，因为此时的await并没有在一个async函数中。如果将forEach中的匿名函数改为async函数依然不行，因为此时的await并没有在router.delete所传入的async函数中，而是在forEach的子async函数中，它await的就是子函数，此时父async函数会在没有await的情况下直接退出。
+还有就是await的部分还可以进一步简化：
+简化前：
+```javascript
+if (comments !== null && comments.length > 0) {
+  // forEach not working here
+  //comments.forEach(function(c) {
+  for (let c of comments) { 
+    await commentsdb.deleteOne(c._id);
+  }
+  //});
+}
+```
+
+简化后：
+```javascript
+if (comments !== null && comments.length > 0) {
+  const deletePromise = comments.map(c => commentsdb.deleteOne(c._id));
+  await Promise.all(deletePromise);
+}
+```
+到这里，comments相关的功能就大致开发完成了。这里只考虑了happy path的情况，下面来聊聊错误处理。
 ## 异常情况处理
 
