@@ -1,9 +1,11 @@
 title: Javascript原型链
 categories:
-- Tech
+  - Tech
 tags:
-- Javascript
+  - Javascript
+date: 2016-03-11 22:15:09
 ---
+
 
 Javascript是一门通过原型链来实现继承的面向对象的动态语言。其原型链机制本身并不复杂，但是理解起来有些绕。本文试图理清原型链的相关知识，并尝试归并以便于理解记忆。<!-- more -->
 本文的所有代码均是在chrome的console中执行。
@@ -179,4 +181,5 @@ a.constructor === Animal;
 
 箭头起点的对象的`__proto__`就是箭头终点的对象。
 
-至此，就先告一段落了。
+我觉得，理解原型链，一定要弄清楚的是函数对象和其他对象的区别，前者除了有`__proto__`之外，还有`prototype`，而这两个是不一样的东西。还有就是，函数对象的`prototype`会在创建对象的时候被赋给该对象的`__proto__`。
+好了，就先到这里。

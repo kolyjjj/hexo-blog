@@ -514,4 +514,108 @@ if (comments !== null && comments.length > 0) {
 ```
 到这里，comments相关的功能就大致开发完成了。这里只考虑了happy path的情况，下面来聊聊错误处理。
 ## 异常情况处理
+写到这里，再来考虑错误情况，总结一下，基本只有两种错误：1）找不到，比如删除的时候根据id找不到对应的记录等，此时应该返回404错误；2）传入的参数错误，比如创建post的时候content为空，此时应该是400错误。不止一个api会返回这样的错误，那么对于错误处理可以集中在一处进行吗？答案当然是可以。既然集中在一处，自然要从api的处理函数中分出去先，还好express提供了next函数。这个函数如果有参数传入的话，会跳过后面的route处理，直接进入下一个错误处理函数，那么什么函数才算是一个错误处理函数呢？看看代码：
+```javascript
+// src/posts/router.js
+router.use((err, req, res, next)=>{
+  res.status(404).send();
+});
+```
+express里面错误处理函数就是有四个参数的函数。其中第一个参数是err对象，即传给next函数的参数。这里以post的删除为例，来看看具体的错误处理：
+重构前：
+```javascript
+// src/posts/router.js
 
+router.delete('/:id', wrap(async function(req, res, next) {
+  try {
+    const comments = await commentsdb.getAll(req.params.id);
+    if (comments !== null && comments.length > 0) {
+      const deletePromise = comments.map(c => commentsdb.deleteOne(c._id));
+      await Promise.all(deletePromise);
+    }
+    console.log('post id', req.params.id);
+    await postsdb.deleteOne(req.params.id);
+    res.status(200).send();
+  } catch (err) {
+    console.log('deleting post error', err);
+    res.status(404).send();
+  }
+}));
+```
+
+重构后：
+```javascript
+
+router.delete('/:id', wrap(async function(req, res, next) {
+  try {
+    const comments = await commentsdb.getAll(req.params.id);
+    if (comments !== null && comments.length > 0) {
+      console.log('deleting comments of posts', comments);
+      const deletePromise = comments.map(c => commentsdb.deleteOne(c._id));
+      await Promise.all(deletePromise);
+    }
+    const result =  await postsdb.deleteOne(req.params.id);
+    if (lodash.isEmpty(result)) return next(new Error(`cannot find post with ${req.params.id}`));
+    res.status(200).send();
+  } catch (err) {
+    next(err);
+  }
+}));
+```
+具体的变化在于result为空的情况以及catch里面的情况，之前是直接在这里处理，现在是通过`next`函数将错误处理delegate出去。其中使用了`new Error(...)`，当然还可以使用自己定义的Error：
+```javascript
+// src/errors/errors.js
+'use strict';
+
+class NotFound extends Error {
+  constructor(message) {
+    super(message);
+    this.code = 404;
+  }
+}
+
+export {NotFound};
+```
+比如上面定义了一个404 Not Found error。本来想使用`err instanceof NotFound`来判断具体抛出的是什么类型的error，结果发现这句在纯粹的ES6环境下是可以工作的，但是在babel的环境下是不行的。所以只有放一个error type在具体的error类里了：
+```javascript
+// src/errors/errors.js
+class NotFound extends Error {
+  constructor(message) {
+    super(message);
+    this.code = '404';
+    this.type = 'NotFound'; // should be same as class name
+  }
+}
+
+// src/posts/router.js
+router.use((err, req, res, next)=>{
+  // instanceof doesn't work here because of babeljs, it should work in pure ES6 environment
+  //console.log('error handler', err instanceof NotFound, err);
+  if (err.type === 'NotFound' || err.name === 'CastError') return res.status(404).send();
+  res.status(500).send();
+});
+```
+下面的是具体的使用。接下来就是一阵的重构了，最后考虑到对于posts模块和comments模块，错误处理基本一致，所以讲error函数放到了`routers.js`中：
+```javascript
+// src/routers.js
+
+let composeErrorJson = (errors) => {
+  let result = {};
+  for (let key in errors) {
+    result[key] = errors[key].message;
+  }
+  return result;
+};
+
+router.use((err, req, res, next)=>{
+  // instanceof doesn't work here because of babeljs, it should work in pure ES6 environment
+  //console.log('error handler', err instanceof NotFound, err);
+  console.log('error handler for posts', err);
+  if (err.type === 'NotFound' || err.name === 'CastError') return res.status(404).send();
+  if (err.name === 'ValidationError') return res.status(400).json(composeErrorJson(err.errors));
+  res.status(500).send();
+});
+```
+至此，error处理就先这样了。
+
+对于comments模块的编写就大概完成了，我想一定有一些bug，就等后面真实调用的时候再来发现和修改了。
