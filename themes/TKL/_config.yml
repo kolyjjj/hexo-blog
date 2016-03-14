@@ -55,5 +55,8 @@ category: 1
 tag: 1
 
 # google analytics config
-google_analytics: UA-74042991-1
+# google_analytics: UA-74042991-1
+
+# baidu analytics config
+baidu_analytics: b9e58ce86835727eab5c9fa8c11c7f1f
 
