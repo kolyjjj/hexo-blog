@@ -1,9 +1,11 @@
 title: Javascript后端开发(二)
 categories:
-- Tech
-tags: 
-- NodeJS
+  - Tech
+tags:
+  - NodeJS
+date: 2016-03-15 00:26:15
 ---
+
 
 本文接着上文[《Javascript后端开发学习》](http://koly.me/2016/01/26/Javascript%E5%90%8E%E7%AB%AF%E5%BC%80%E5%8F%91%E5%AD%A6%E4%B9%A0/)。将继续记录学习NodeJS后端开发的“流水”。这篇主要是记录comments的CRUD。<!-- more -->
 ## 编码前的思考
