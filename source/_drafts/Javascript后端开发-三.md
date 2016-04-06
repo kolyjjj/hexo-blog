@@ -288,7 +288,146 @@ usersdb.getOneWithoutPasswordField = userId => {
 
 ### user validation
 在创建user的时候需要对传入的数据进行验证，之前在做post以及comment的时候，验证是放在具体的router里面的，这里尝试使用一个middleware来做验证。
+
+```javascript
+// src/routers.js
+import requestValidation from './validation/requestValidation';
+
+router.use('*/', requestValidation);
+
+```
+
+创建requestValidation:
+
+```javascript
+// src/validation/requestValidation.js
+'use strict';
+
+const rules = {
+  createUser: {
+    method: 'POST',
+    url: '/api/users/',
+    body: {
+      name: {
+        required: 'name should be not empty'
+      } 
+    }
+  }
+};
+
+const requestValidation = function(req, res, next) {
+  console.log('request validation middleware');
+  console.log('req method and base url', req.method, req.baseUrl);
+  let errors = [];
+  const createUserRules = rules.createUser.body;
+  if (req.method === 'POST' && req.baseUrl === '/api/users') {
+    for (let k in req.body) {
+      if (createUserRules[k]) {
+        if(createUserRules[k].hasOwnProperty('required') && req.body[k].length === 0) {
+          let temp = {};
+          temp[k] = createUserRules[k].required;
+          errors.push(temp);
+        }
+      }
+    }
+  }
+  console.log('errors', errors);
+  if (errors.length > 0 ) {
+    res.status(400).send({errors: errors});
+    return;
+  }
+  next();
+};
+
+export default requestValidation;
+```
+这里定义了一个rule来收集验证条件，比如http方法是什么，url是什么，然后验证的规则是什么。后面又加上了更多的验证规则。由于验证规则跟验证机制相对独立，验证规则是容易变化的，而验证的机制却是不易变化的，所以将容易变化的验证规则单独放在了一个文件里面：
+
+```javascript
+// src/validation/rules.js
+
+'use strict';
+const rules = {
+  createUser: {
+    method: 'POST',
+    url: '/api/users',
+    body: {
+      name: {
+        required: 'should be not empty',
+        minLength: [4, 'should be longer than 4 characters']
+      },
+      accountId: {
+        required: 'should not be empty',
+        minLength: [4, 'should be longer than 4 characters']
+      },
+      password: {
+        required: 'should not be empty',
+        minLength: [6, 'should be longer than 6 characters']
+      },
+      email: {
+        required: 'should not be empty',
+        minLength: [3, 'should be longer than 3 characters']
+      }
+    }
+  }
+};
+
+export default rules;
+```
+
 ### 加入logging
-在尝试了使用winson之后，果断放弃，然后选择了log4js。
+在尝试了使用winson之后，果断放弃，然后选择了log4js。为什么会放弃winson呢？看下面的代码：
+```javascript
+let result = await usersdb.save(req.body);
+logger.debug('result', result);
+```
+上面的代码期望输出result的值，但是却输出了其他的东西。使用：
+
+```javascript
+let result = await usersdb.save(req.body);
+logger.debug('result', util.inspect(result));
+```
+才可以输出想要的结果。而且，配置成为类似Apache Tomcat的输出还不容易：
+```javascript
+// src/logger/index.js
+
+const logger = new (winston.Logger)({
+  level: 'debug',
+  transports: [
+    new (winston.transports.Console)({
+      timestamp: function() {
+        return Date.now();
+      },
+      formatter: function(options) {
+        // Return string will be passed to logger.
+        return options.timestamp() +' '+ options.level.toUpperCase() +' '+ (undefined !== options.message ? options.message : '') +
+          (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
+      }
+    }),
+    new (winston.transports.File)({ filename: 'app.log' })
+  ]}
+  );
+```
+所以使用了一会儿之后，换成了log4js：
+
+```javascript
+// src/logger/index.js
+
+'use strict';
+
+import log4js from 'log4js';
+
+const logger = log4js.getLogger();
+logger.setLevel('DEBUG');
+
+export default logger;
+```
+
+以及使用：
+```javascript
+let result = await usersdb.save(req.body);
+logger.debug('result', result);
+```
+之后就讲之前的`console.log`换成了logger了。这里还有一个需要注意的是，没有直接使用log4js，而是使用logger/index.js进行了一次封装。
 ### authentication
 ### authorisation
